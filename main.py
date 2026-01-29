@@ -1,8 +1,11 @@
 import tkinter as tk
 from gui import AplicacionHorario
 import sys
+import datos_prueba
 
 def main():
+    datos_prueba.cargar_datos_complejos()
+    
     try:
         # 1. Creamos la instancia de la aplicación principal (Tkinter)
         app = AplicacionHorario()

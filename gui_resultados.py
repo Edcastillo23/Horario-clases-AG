@@ -140,7 +140,7 @@ class VentanaResultados(tk.Toplevel):
             agenda = self.horario.agenda_prim
             bloques_info = cfg.BLOQUES_PRIM # Debes tener los textos de hora aquí
             # Si BLOQUES_PRIM en config es diccionario, asegura tener una lista de etiquetas
-            # Ejemplo simplificado: etiquetas_horas = ["07:00-07:45", ...]
+            
             etiquetas_horas = [b['label'] for b in cfg.BLOQUES_PRIM] # Asumiendo estructura dict
         else:
             agenda = self.horario.agenda_sec
@@ -304,9 +304,11 @@ class VentanaResultados(tk.Toplevel):
         
         
 
+    # En gui_resultados.py
+
     def generar_tabla_pdf(self, pdf, titulo, encabezados_filas, datos_celdas, color_base):
         """Helper para crear una página de tabla en el PDF"""
-        fig, ax = plt.subplots(figsize=(11, 8.5)) # Tamaño carta horizontal
+        fig, ax = plt.subplots(figsize=(11, 8.5)) 
         ax.axis('tight')
         ax.axis('off')
         
@@ -320,15 +322,24 @@ class VentanaResultados(tk.Toplevel):
         
         tabla.auto_set_font_size(False)
         tabla.set_fontsize(8)
-        tabla.scale(1, 2.5)
+        tabla.scale(1, 2.0) # Ajusta altura de filas
         
-        # Colorear cabeceras
+        # Estilizar celdas
         for (row, col), cell in tabla.get_celld().items():
             if row == 0 or col == -1:
+                # Cabeceras
                 cell.set_facecolor('#455a64')
                 cell.set_text_props(color='white', weight='bold')
-            elif datos_celdas[row-1][col] != "":
-                cell.set_facecolor(color_base)
+            else:
+                # Verificar si es una fila de DESCANSO
+                # En datos_celdas, las filas de descanso tienen el texto "DESCANSO" en todas las columnas
+                texto_celda = datos_celdas[row-1][col]
+                
+                if texto_celda == "DESCANSO":
+                    cell.set_facecolor('#ffccbc') # Color Naranja Suave para descansos
+                    cell.set_text_props(weight='bold', color='#bf360c')
+                elif texto_celda != "":
+                    cell.set_facecolor(color_base) # Color normal de clase
 
         ax.set_title(titulo, fontsize=16, weight='bold', pad=30)
         pdf.savefig(fig, bbox_inches='tight')
@@ -345,50 +356,79 @@ class VentanaResultados(tk.Toplevel):
         try:
             with PdfPages(filename) as pdf:
                 # --- PÁGINA 1: RESUMEN DE CARGA ---
-                self.log("Generando resumen de carga...") # Si tienes acceso al log
                 self.generar_resumen_carga(pdf)
-                # 1. SECCIÓN: HORARIOS POR GRADO
+
+                # --- SECCIÓN: HORARIOS POR GRADO (CON DESCANSOS) ---
                 for g in cfg.GRUPOS_PRIMARIA + cfg.GRUPOS_BACHILLERATO:
                     es_prim = g in cfg.GRUPOS_PRIMARIA
-                    bloques = cfg.BLOQUES_PRIM if es_prim else cfg.BLOQUES_SEC
-                    agenda = self.horario.agenda_prim[g] if es_prim else self.horario.agenda_sec[g]
                     
-                    etiquetas = [b['label'] for b in bloques]
+                    # Usamos la lista COMPLETA de tiempos (True y False)
+                    tiempos_completos = cfg.TIEMPOS_PRIM if es_prim else cfg.TIEMPOS_BACH
+                    agenda_matriz = self.horario.agenda_prim[g] if es_prim else self.horario.agenda_sec[g]
+                    
+                    etiquetas_filas = []
                     celdas = []
-                    for b_idx in range(len(etiquetas)):
+                    
+                    # Contador para saber en qué índice de bloque ACADÉMICO vamos
+                    idx_bloque_academico = 0
+                    
+                    for (ini, fin, es_clase) in tiempos_completos:
+                        etiqueta = f"{ini} - {fin}"
+                        etiquetas_filas.append(etiqueta)
+                        
                         fila = []
-                        for d_idx in range(len(cfg.DIAS)):
-                            c = agenda[d_idx][b_idx]
-                            fila.append(f"{c[0]}\n({c[1]})" if c else "")
+                        if es_clase:
+                            # Es hora de clase: Buscamos en la matriz del algoritmo
+                            for d_idx in range(len(cfg.DIAS)):
+                                try:
+                                    c = agenda_matriz[d_idx][idx_bloque_academico]
+                                    fila.append(f"{c[0]}\n({c[1]})" if c else "")
+                                except IndexError:
+                                    fila.append("---")
+                            idx_bloque_academico += 1
+                        else:
+                            # Es DESCANSO: Llenamos la fila con la palabra clave
+                            fila = ["DESCANSO"] * len(cfg.DIAS)
+                        
                         celdas.append(fila)
                     
-                    self.generar_tabla_pdf(pdf, f"HORARIO DE CLASES - GRADO: {g}", etiquetas, celdas, '#e3f2fd')
+                    self.generar_tabla_pdf(pdf, f"HORARIO - GRADO: {g}", etiquetas_filas, celdas, '#e3f2fd')
 
-                # 2. SECCIÓN: HORARIOS POR DOCENTE (GRADOS A VISITAR)
+                # --- SECCIÓN: HORARIOS POR DOCENTE (CON DESCANSOS BACHILLERATO) ---
                 profesores = [d.nombre for d in dm.BASE_DATOS["docentes"]]
+                tiempos_profe = cfg.TIEMPOS_BACH # Usamos la referencia de Bachillerato para profes
+                
                 for p in profesores:
-                    agenda_p = self.obtener_horario_docente(p)
-                    etiquetas = [b['label'] for b in cfg.BLOQUES_SEC] # Usamos base Bachiller por ser la más larga
+                    agenda_p = self.obtener_horario_docente(p) # Esta función devuelve solo bloques académicos
                     
+                    etiquetas_filas = []
                     celdas = []
-                    # Convertir agenda del profe a matriz de texto
-                    for b_idx in range(len(etiquetas)):
+                    idx_bloque_academico = 0
+                    
+                    for (ini, fin, es_clase) in tiempos_profe:
+                        etiqueta = f"{ini} - {fin}"
+                        etiquetas_filas.append(etiqueta)
+                        
                         fila = []
-                        for d_idx in range(len(cfg.DIAS)):
-                            fila.append(agenda_p[d_idx][b_idx] if agenda_p[d_idx][b_idx] else "")
+                        if es_clase:
+                            for d_idx in range(len(cfg.DIAS)):
+                                try:
+                                    # agenda_p solo tiene datos en índices académicos
+                                    val = agenda_p[d_idx][idx_bloque_academico]
+                                    fila.append(val if val else "")
+                                except IndexError:
+                                    fila.append("")
+                            idx_bloque_academico += 1
+                        else:
+                            fila = ["DESCANSO"] * len(cfg.DIAS)
+                        
                         celdas.append(fila)
                     
-                    self.generar_tabla_pdf(pdf, f"AGENDA DEL DOCENTE: {p.upper()}\n(Grados a visitar)", etiquetas, celdas, '#f1f8e9')
+                    self.generar_tabla_pdf(pdf, f"AGENDA DOCENTE: {p.upper()}", etiquetas_filas, celdas, '#f1f8e9')
 
-            messagebox.showinfo("Éxito", "PDF generado con resumen y horarios detallados.")
+            messagebox.showinfo("Éxito", "PDF generado con descansos incluidos.")
+            
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo generar el PDF: {e}")
-
-        if filename:
-                try:
-                    # bbox_inches='tight' recorta los bordes blancos extra
-                    self.fig.savefig(filename, dpi=300, bbox_inches='tight')
-                    messagebox.showinfo("Éxito", f"Horario guardado en:\n{filename}")
-                except Exception as e:
-                    messagebox.showerror("Error", f"No se pudo guardar: {e}")
+            messagebox.showerror("Error", f"Detalle del error: {e}")
+            print(e) # Para ver el error en consola si falla
 

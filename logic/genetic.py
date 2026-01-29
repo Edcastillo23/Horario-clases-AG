@@ -53,6 +53,49 @@ class HorarioGenetico:
         return score
 
     def _check_pedagogia_grupos(self, agenda, nivel):
+        """
+        Aplica las nuevas reglas estrictas:
+        1. Max 2 horas por día por materia (Penalización masiva si > 2).
+        2. Si son 2 horas, deben ser consecutivas.
+        3. Si es 1 hora, es libre.
+        """
+        score = 0
+        
+        for grupo in agenda:
+            for d_idx in range(len(cfg.DIAS)):
+                bloques_dia = agenda[grupo][d_idx] # Lista de bloques del día
+                
+                # 1. Contar ocurrencias de cada materia en este día
+                conteo_materias = {}
+                for b in bloques_dia:
+                    if b is not None:
+                        materia = b[0] # b es tupla (Materia, Docente)
+                        conteo_materias[materia] = conteo_materias.get(materia, 0) + 1
+                
+                # 2. Evaluar reglas sobre los conteos
+                for materia, total in conteo_materias.items():
+                    
+                    # REGLA DE ORO: Nunca 3 o más horas el mismo día (consecutivas o no)
+                    # Esto evita: Ingles, Ingles, Mates, Ingles
+                    if total > 2:
+                        score -= 5000 # Penalización crítica (inaceptable)
+
+                    # REGLA: Si son 2 horas, deben estar pegadas
+                    elif total == 2:
+                        # Buscamos en qué posiciones (índices) están
+                        indices = [i for i, x in enumerate(bloques_dia) if x and x[0] == materia]
+                        
+                        # Si la distancia entre índices es 1, son consecutivas (ej: 0 y 1)
+                        if indices[1] == indices[0] + 1:
+                            score += 50 # PREMIO: Bloque bien formado
+                        else:
+                            score -= 200 # CASTIGO: Bloque separado (ej: Ingles, Mates, Ingles)
+
+                    # REGLA: Si es 1 hora
+                    elif total == 1:
+                        score += 10 # Pequeño premio (es válido)
+        
+        return score
         """Verifica bloques de 2 horas, máximo 2h/día y prohibición de 3h+ seguidas"""
         penalizacion = 0
         

@@ -231,60 +231,98 @@ class AplicacionHorario(tk.Tk):
 
     def proceso_ag_background(self):
         try:
-            # --- PARÁMETROS AUMENTADOS PARA MEJOR RESULTADO ---
-            pob_size = 150
-            gens = 1000
+            # --- PARÁMETROS OPTIMIZADOS ---
+            pob_size = 500  
+            gens = 2000
             
-            self.log(f"Iniciando AG (Población: {pob_size}, Generaciones: {gens})...")
+            # Tasa de mutación dinámica
+            tasa_mutacion_base = 0.2
+            tasa_mutacion_actual = tasa_mutacion_base
             
+            self.log(f"Iniciando Motor Genético Inteligente...")
+            self.log(f"Población: {pob_size} | Generaciones Máx: {gens}")
+            
+            # 1. Inicialización
             poblacion = [ag.HorarioGenetico() for _ in range(pob_size)]
             for h in poblacion:
                 h.inicializar(dm.BASE_DATOS["asignaciones"])
                 h.calcular_fitness()
 
-            best = poblacion[0]
-            elitismo = True
+            best = copy.deepcopy(poblacion[0])
+            generaciones_sin_mejora = 0
 
+            # 2. Ciclo Evolutivo
             for gen in range(gens):
+                # Ordenar: Los mejores (fitness cercano a 0) arriba
                 poblacion.sort(key=lambda x: x.fitness, reverse=True)
                 
-                if poblacion[0].fitness > best.fitness:
-                    best = copy.deepcopy(poblacion[0])
-                    self.log(f"Gen {gen}: Mejor Fitness = {best.fitness}")
+                mejor_actual = poblacion[0]
                 
-                if best.fitness == 0:
-                    self.log("¡Solución perfecta encontrada!")
-                    break
+                # --- DETECCIÓN DE MEJORA ---
+                if mejor_actual.fitness > best.fitness:
+                    diff = mejor_actual.fitness - best.fitness
+                    best = copy.deepcopy(mejor_actual)
+                    generaciones_sin_mejora = 0
+                    tasa_mutacion_actual = tasa_mutacion_base # Resetear mutación si mejoramos
+                    self.log(f"Gen {gen}: Mejora encontrada! Fitness = {best.fitness}")
+                else:
+                    generaciones_sin_mejora += 1
 
-                # Evolución
-                nueva_pob = []
-                if elitismo:
-                    nueva_pob.append(best) # Guardar al mejor
+                # --- ESTRATEGIA DE SALIDA ---
+                if best.fitness == 0:
+                    self.log("¡Solución PERFECTA encontrada (Fitness 0)!")
+                    break
                 
+                # --- ESTRATEGIA ANTI-ESTANCAMIENTO ---
+                # Si llevamos 50 generaciones atascados, nos volvemos agresivos
+                if generaciones_sin_mejora > 50:
+                    tasa_mutacion_actual = 0.6 # Mutación agresiva (60%)
+                    if generaciones_sin_mejora % 50 == 0:
+                        self.log(f"⚠ Estancado {generaciones_sin_mejora} gens. Aumentando mutación a {int(tasa_mutacion_actual*100)}%...")
+                elif generaciones_sin_mejora > 20:
+                    tasa_mutacion_actual = 0.4
+                else:
+                    tasa_mutacion_actual = tasa_mutacion_base
+
+                # --- EVOLUCIÓN (CRUCE Y MUTACIÓN) ---
+                nueva_pob = []
+                
+                # ELITISMO: Guardamos los 2 mejores intactos
+                nueva_pob.append(best)
+                nueva_pob.append(copy.deepcopy(poblacion[1]))
+                
+                # RELLENO
                 while len(nueva_pob) < pob_size:
-                    # Torneo simple
-                    p1 = random.choice(poblacion[:20]) # Elegir de los mejores 20
-                    p2 = random.choice(poblacion[:20])
+                    # Torneo: Elegimos 2 pares al azar y pelean
+                    p1 = max(random.sample(poblacion[:50], 2), key=lambda x: x.fitness) # Elige de los 50 mejores
+                    p2 = max(random.sample(poblacion[:50], 2), key=lambda x: x.fitness)
                     
                     hijo = ag.cruzar(p1, p2)
-                    ag.mutar(hijo)
+                    
+                    # Mutación dinámica
+                    if random.random() < tasa_mutacion_actual:
+                        ag.mutar(hijo)
+                    
                     hijo.calcular_fitness()
                     nueva_pob.append(hijo)
                 
                 poblacion = nueva_pob
                 
-                # Pausa para no saturar la GUI
-                if gen % 50 == 0: time.sleep(0.01)
+                # Refresco visual moderado
+                if gen % 20 == 0: time.sleep(0.001)
 
             self.log("--- PROCESO TERMINADO ---")
             self.log(f"Calificación Final: {best.fitness}")
             
+            if best.fitness < 0:
+                self.log("NOTA: Si el fitness es negativo, aún hay reglas rotas.")
+                self.log("Intenta correrlo de nuevo o revisa la disponibilidad docente.")
+
             self.btn_run.config(state="normal")
-            # Usar 'after' para manipular GUI desde hilo secundario
             self.after(100, lambda: self.abrir_ventana_resultados(best))
             
         except Exception as e:
-            self.log(f"Error: {e}")
+            self.log(f"Error Crítico en AG: {e}")
             print(e)
             self.btn_run.config(state="normal")
 

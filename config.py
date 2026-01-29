@@ -17,7 +17,7 @@ TIEMPOS_BACH = [
     ("13:30", "14:20", True),  # B6
     ("14:20", "15:10", True)   # B7
 ]
-# Indices de bloques académicos solamente (0, 1, 3, 4, 6, 7, 9, 10 en la lista total)
+
 # Para simplificar, creamos una lista limpia con sus tiempos reales en minutos
 BLOQUES_SEC = []
 for i, (ini, fin, es_clase) in enumerate(TIEMPOS_BACH):
@@ -30,16 +30,16 @@ for i, (ini, fin, es_clase) in enumerate(TIEMPOS_BACH):
         })
 
 # --- PRIMARIA ---
-# Supongamos bloques de 45 min
+# Bloques de 50 min
 TIEMPOS_PRIM = [
     ("07:00", "07:50", True),
     ("07:50", "08:40", True),
     ("08:40", "09:10", False), # Receso
     ("09:10", "10:00", True),
     ("10:00", "10:50", True),
-    ("10:50", "11:10", False), # Receso
-    ("11:10", "12:00", True),
-    ("12:00", "12:50", True)
+    ("10:50", "11:00", False), # Receso
+    ("11:00", "11:50", True),
+    ("11:50", "12:40", True)
 ]
 BLOQUES_PRIM = []
 for i, (ini, fin, es_clase) in enumerate(TIEMPOS_PRIM):
