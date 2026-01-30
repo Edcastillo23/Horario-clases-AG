@@ -67,8 +67,11 @@ def cargar_datos_complejos():
             ("Informática", 1, ["6°","7°","8°","9°"]),
             ("Informática", 2, ["1°","2°","3°","4°","5°"]),
             ("Artística",   2, ["6°","7°","8°","9°"]),
-            ("Edu. Física", 2, ["6°","7°","8°","9°"])    
-        ],   
+            ("Edu. Física", 2, ["6°","8°"])    
+        ],
+        "Profe Juan David FI": [
+            ("Edu. Física", 2, ["7°","9°"])    
+        ], 
         "Profe Cristina": [
             ("Inglés", 6, ["6°","7°","8°","9°"]),
             ("Inglés", 4, ["3°","4°","5°"])    

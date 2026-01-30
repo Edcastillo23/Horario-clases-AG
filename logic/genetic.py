@@ -1,7 +1,6 @@
 import random
 import copy
 import config as cfg
-import data_manager as dm
 
 class HorarioGenetico:
     def __init__(self):
@@ -40,138 +39,215 @@ class HorarioGenetico:
     def calcular_fitness(self):
         score = 0
         
-        # 1. RESTRICCIÓN DURA: Choques de Docente (Mismo Nivel y Cruzado)
+        # 1. RESTRICCIONES CRÍTICAS (Choques Docentes)
         score += self._check_choques_internos(self.agenda_prim, len(cfg.BLOQUES_PRIM))
         score += self._check_choques_internos(self.agenda_sec, len(cfg.BLOQUES_SEC))
         score += self._check_choques_cruzados()
 
-        # 2. NUEVA RESTRICCIÓN: Pedagogía de Bloques y Máximo Diario
-        score += self._check_pedagogia_grupos(self.agenda_prim, "Primaria")
-        score += self._check_pedagogia_grupos(self.agenda_sec, "Bachillerato")
+        # 2. ANTI-FRAGMENTACIÓN Y PEDAGOGÍA
+        score += self._check_pedagogia_y_fragmentacion(self.agenda_prim)
+        score += self._check_pedagogia_y_fragmentacion(self.agenda_sec)
+
+        # 3. REGLA DEL UNIFORME Y DEPORTES (Separación de días)
+        score += self._check_distribucion_deportiva(self.agenda_prim, "Primaria")
+        score += self._check_distribucion_deportiva(self.agenda_sec, "Bachillerato")
+
+        # 4. NUEVA REGLA: SINCRONIZACIÓN DE PARES (6-7 y 8-9)
+        score += self._check_sincronizacion_pares(self.agenda_sec)
+
+        # 5. COMPACIDAD (Evitar huecos a primera hora)
+        score += self._check_huecos_incomodos(self.agenda_prim)
+        score += self._check_huecos_incomodos(self.agenda_sec)
 
         self.fitness = score
         return score
 
-    def _check_pedagogia_grupos(self, agenda, nivel):
+    def _check_sincronizacion_pares(self, agenda):
         """
-        Aplica las nuevas reglas estrictas:
-        1. Max 2 horas por día por materia (Penalización masiva si > 2).
-        2. Si son 2 horas, deben ser consecutivas.
-        3. Si es 1 hora, es libre.
+        Obliga a que pares de grados específicos tengan Edu. Física 
+        exactamente al mismo tiempo.
         """
         score = 0
-        
-        for grupo in agenda:
-            for d_idx in range(len(cfg.DIAS)):
-                bloques_dia = agenda[grupo][d_idx] # Lista de bloques del día
-                
-                # 1. Contar ocurrencias de cada materia en este día
-                conteo_materias = {}
-                for b in bloques_dia:
-                    if b is not None:
-                        materia = b[0] # b es tupla (Materia, Docente)
-                        conteo_materias[materia] = conteo_materias.get(materia, 0) + 1
-                
-                # 2. Evaluar reglas sobre los conteos
-                for materia, total in conteo_materias.items():
-                    
-                    # REGLA DE ORO: Nunca 3 o más horas el mismo día (consecutivas o no)
-                    # Esto evita: Ingles, Ingles, Mates, Ingles
-                    if total > 2:
-                        score -= 5000 # Penalización crítica (inaceptable)
+        # Pares a sincronizar (asegúrate que los nombres coincidan con config.py)
+        # Nota: Si usas "6°" o "6", ajústalo aquí.
+        pares_objetivo = [("6°", "7°"), ("8°", "9°")] 
+        claves_fisica = ["física", "fisica", "deporte"]
 
-                    # REGLA: Si son 2 horas, deben estar pegadas
-                    elif total == 2:
-                        # Buscamos en qué posiciones (índices) están
-                        indices = [i for i, x in enumerate(bloques_dia) if x and x[0] == materia]
-                        
-                        # Si la distancia entre índices es 1, son consecutivas (ej: 0 y 1)
-                        if indices[1] == indices[0] + 1:
-                            score += 50 # PREMIO: Bloque bien formado
-                        else:
-                            score -= 200 # CASTIGO: Bloque separado (ej: Ingles, Mates, Ingles)
+        for g1, g2 in pares_objetivo:
+            # Validar que los grupos existan en la agenda actual
+            if g1 not in agenda or g2 not in agenda:
+                continue
 
-                    # REGLA: Si es 1 hora
-                    elif total == 1:
-                        score += 10 # Pequeño premio (es válido)
+            # Recorrer toda la semana bloque a bloque
+            for d in range(len(cfg.DIAS)):
+                for b in range(len(cfg.BLOQUES_SEC)):
+                    bloque1 = agenda[g1][d][b]
+                    bloque2 = agenda[g2][d][b]
+
+                    # Determinar si hay física en G1
+                    tiene_fisica_1 = False
+                    if bloque1:
+                        if any(k in bloque1[0].lower() for k in claves_fisica):
+                            tiene_fisica_1 = True
+
+                    # Determinar si hay física en G2
+                    tiene_fisica_2 = False
+                    if bloque2:
+                        if any(k in bloque2[0].lower() for k in claves_fisica):
+                            tiene_fisica_2 = True
+
+                    # EVALUACIÓN DE SINCRONÍA
+                    if tiene_fisica_1 and tiene_fisica_2:
+                        score += 500 # ¡Bien! Sincronizados
+                    elif tiene_fisica_1 != tiene_fisica_2:
+                        # Uno tiene y el otro no -> ERROR GRAVE
+                        score -= 5000 
         
         return score
-        """Verifica bloques de 2 horas, máximo 2h/día y prohibición de 3h+ seguidas"""
-        penalizacion = 0
-        
+
+    def _check_pedagogia_y_fragmentacion(self, agenda):
+        score = 0
         for grupo in agenda:
+            bloques_unitarios_semanales = {} 
+
             for d_idx in range(len(cfg.DIAS)):
-                dia_clases = agenda[grupo][d_idx] # Lista de materias del día
-                
-                # Diccionario para contar horas totales de cada materia en el día
+                bloques_dia = agenda[grupo][d_idx]
                 conteo_dia = {}
-                
-                # Analizar bloques consecutivos
                 i = 0
-                while i < len(dia_clases):
-                    clase_actual = dia_clases[i]
-                    
-                    if clase_actual is None:
+                while i < len(bloques_dia):
+                    if bloques_dia[i] is None:
                         i += 1
                         continue
                     
-                    materia = clase_actual[0]
-                    conteo_dia[materia] = conteo_dia.get(materia, 0) + 1
-                    
-                    # Medir duración del bloque consecutivo
-                    duracion_bloque = 1
+                    materia = bloques_dia[i][0]
+                    longitud = 1
                     j = i + 1
-                    while j < len(dia_clases) and dia_clases[j] is not None and dia_clases[j][0] == materia:
-                        duracion_bloque += 1
+                    while j < len(bloques_dia) and bloques_dia[j] and bloques_dia[j][0] == materia:
+                        longitud += 1
                         j += 1
                     
-                    # REGLA: Bloques de exactamente 2 horas
-                    if duracion_bloque == 1:
-                        # Si la materia tiene más de 1 hora semanal, no debería estar sola
-                        penalizacion -= 100 
-                    elif duracion_bloque == 2:
-                        penalizacion += 50 # Premio por cumplir el bloque doble
-                    elif duracion_bloque >= 3:
-                        # REGLA: Nunca 3 horas o más seguidas
-                        penalizacion -= 1000 
-                    
-                    i = j # Saltar al final del bloque analizado
+                    conteo_dia[materia] = conteo_dia.get(materia, 0) + longitud
 
-                # REGLA: No más de 2 horas de la misma materia al día para el grupo
-                for materia, total_horas in conteo_dia.items():
-                    if total_horas > 2:
-                        penalizacion -= 800
+                    if longitud == 1:
+                        bloques_unitarios_semanales[materia] = bloques_unitarios_semanales.get(materia, 0) + 1
+                    elif longitud == 2:
+                        score += 200 
+                    elif longitud >= 3:
+                        score -= 5000 
 
-        return penalizacion
+                    i = j 
+
+                for mat, total in conteo_dia.items():
+                    if total > 2:
+                        score -= 2000
+
+            for materia, cantidad_unitarios in bloques_unitarios_semanales.items():
+                if cantidad_unitarios > 1:
+                    penalizacion = (cantidad_unitarios - 1) * 800
+                    score -= penalizacion
+        return score
+
+    def _check_distribucion_deportiva(self, agenda, nivel):
+        score = 0
+        claves_fisica = ["física", "fisica", "deporte"]
+        claves_danza = ["danza", "baile", "danzas"]
+
+        for grupo in agenda:
+            dias_fisica = {} 
+            dias_danza = {}  
+
+            for d_idx in range(len(cfg.DIAS)):
+                h_f = 0
+                h_d = 0
+                for bloque in agenda[grupo][d_idx]:
+                    if bloque:
+                        nm = bloque[0].lower()
+                        if any(k in nm for k in claves_fisica): h_f += 1
+                        if any(k in nm for k in claves_danza): h_d += 1
+                
+                if h_f > 0: dias_fisica[d_idx] = h_f
+                if h_d > 0: dias_danza[d_idx] = h_d
+
+            if nivel == "Primaria":
+                dia_uniforme_found = False
+                dias_solo_danza = []
+                all_days = set(dias_fisica.keys()) | set(dias_danza.keys())
+                
+                for d in all_days:
+                    hf = dias_fisica.get(d, 0)
+                    hd = dias_danza.get(d, 0)
+
+                    if hf >= 1 and hd >= 1:
+                        if hf == 2 and hd == 1:
+                            score += 5000 
+                            dia_uniforme_found = True
+                        else:
+                            score += 500 
+                    elif hf > 0 and hd == 0:
+                        score -= 2000 
+                    elif hd > 0 and hf == 0:
+                        dias_solo_danza.append(d)
+
+                if dia_uniforme_found and dias_solo_danza:
+                    dias_mix = [d for d, h in dias_fisica.items() if dias_danza.get(d, 0) > 0]
+                    for d_mix in dias_mix:
+                        for d_danza in dias_solo_danza:
+                            dist = abs(d_mix - d_danza)
+                            if dist == 1: score -= 3000 
+                            else: score += 1000 
+
+            elif nivel == "Bachillerato":
+                l_fis = list(dias_fisica.keys())
+                l_dan = list(dias_danza.keys())
+                if l_fis and l_dan:
+                    for df in l_fis:
+                        for dd in l_dan:
+                            dist = abs(df - dd)
+                            if dist == 0: score -= 3000
+                            elif dist == 1: score -= 2000
+                            else: score += 500
+        return score
+
+    def _check_huecos_incomodos(self, agenda):
+        score = 0
+        for grupo in agenda:
+            for d_idx in range(len(cfg.DIAS)):
+                bloques = agenda[grupo][d_idx]
+                if blocks_are_empty(bloques[0]):
+                    if any(b is not None for b in bloques):
+                        score -= 200
+        return score
 
     def _check_choques_internos(self, agenda, num_bloques):
         penalizacion = 0
         for d in range(len(cfg.DIAS)):
             for b in range(num_bloques):
                 profes = [agenda[g][d][b][1] for g in agenda if agenda[g][d][b] is not None]
-                dupes = len(profes) - len(set(profes))
-                if dupes > 0:
-                    penalizacion -= (500 * dupes)
+                if len(profes) != len(set(profes)):
+                    penalizacion -= 5000 
         return penalizacion
 
     def _check_choques_cruzados(self):
         penalizacion = 0
         for d_idx in range(len(cfg.DIAS)):
-            for b_prim_idx in range(len(cfg.BLOQUES_PRIM)):
-                profes_prim = [self.agenda_prim[g][d_idx][b_prim_idx][1] 
-                            for g in cfg.GRUPOS_PRIMARIA if self.agenda_prim[g][d_idx][b_prim_idx]]
-                
+            for b_prim in range(len(cfg.BLOQUES_PRIM)):
+                profes_prim = set()
+                for g in cfg.GRUPOS_PRIMARIA:
+                    clase = self.agenda_prim[g][d_idx][b_prim]
+                    if clase: profes_prim.add(clase[1])
                 if not profes_prim: continue
-                
-                bloques_sec_conflictivos = cfg.MAPA_COLISIONES.get(b_prim_idx, [])
-                for b_sec_idx in bloques_sec_conflictivos:
+
+                bloques_sec = cfg.MAPA_COLISIONES.get(b_prim, [])
+                for b_sec in bloques_sec:
                     for g_sec in cfg.GRUPOS_BACHILLERATO:
-                        clase_sec = self.agenda_sec[g_sec][d_idx][b_sec_idx]
+                        clase_sec = self.agenda_sec[g_sec][d_idx][b_sec]
                         if clase_sec and clase_sec[1] in profes_prim:
-                            penalizacion -= 1000
+                            penalizacion -= 5000
         return penalizacion
 
-# --- OPERADORES (Cruce y Mutación se mantienen igual) ---
+def blocks_are_empty(bloque):
+    return bloque is None
+
 def cruzar(padre1, padre2):
     hijo = HorarioGenetico()
     for g in cfg.GRUPOS_PRIMARIA:
